@@ -13,6 +13,7 @@
 #include <GdiPlus.h>
 #pragma comment(lib, "gdiplus.lib")
 #include <list>
+#include "HUDItem.h"
 using namespace std;
 using namespace ::Gdiplus;
 
@@ -72,294 +73,13 @@ void DoubleBuffering::swap()
 	::BitBlt(this->firstDC, 0, 0, this->width, this->height, this->secondDC, 0, 0, SRCCOPY);
 }
 
-// ==================================================================
-//	HUDItem
-// ==================================================================
-class HUDItem
-{
-public:
-	HUDItem(int x, int y, int height, int width, int zOrder);
-	~HUDItem();
 
-	// 指定のHDCにこのHUDを描画します
-	virtual void draw(HDC);
-	virtual void drawDebugInfo(HDC);
-	virtual BOOL hitTest(POINT pt);
-	virtual HUDItem *getHitTestItem(POINT pt);
-	virtual BOOL correctRect(int x, int y, int width, int height, bool flag);
-	virtual void relativeMoveTo(int moveX, int moveY);
-	virtual void moveTo(int moveX, int moveY);
-
-	int x;
-	int y;
-	int zOrder;
-	int height;
-	int width;
-};
-
-HUDItem::HUDItem(int x, int y, int height, int width, int zOrder)
-{
-	this->x = x;
-	this->y = y;
-	this->zOrder = zOrder;
-	this->height = height;
-	this->width = width;
-}
-
-HUDItem::~HUDItem()
-{
-}
-
-void HUDItem::draw(HDC hdc)
-{
-	trace(L"HUDItem::draw();\n");
-
-	::FillRectBrush(hdc, this->x, this->y,
-	this->width, this->height, RGB(255,0,0));
-
-	::drawRectColor(hdc, this->x, this->y,
-	this->width, this->height, RGB(255,255,255), 1);
-
-	::SetBkMode(hdc, TRANSPARENT);
-	::SetTextColor(hdc, RGB(255,255,255));
-
-	drawDebugInfo(hdc);
-}
-
-void HUDItem::drawDebugInfo(HDC hdc)
-{	
-	LPTSTR debugInfo = ::sprintf_alloc(L"%d,%d %d:%d (z:%d)", this->x, this->y, this->width, this->height, this->zOrder);
-	::TextOut(hdc, this->x, this->y, debugInfo, lstrlen(debugInfo));
-	::GlobalFree(debugInfo);
-}
-
-BOOL HUDItem::hitTest(POINT pt)
-{
-	if(this->x <= pt.x && pt.x <= this->x + this->width &&
-		this->y <= pt.y && pt.y <= this->y + this->height){
-		return TRUE;
-	}
-	return FALSE;
-}
-
-// ヒットしたらヒットしたHUD要素を返却
-// ヒットしなかったらNULLを返却します
-HUDItem *HUDItem::getHitTestItem(POINT pt)
-{
-	if(hitTest(pt)){
-		return this;
-	}
-	return NULL;
-}
-
-// 指定の範囲に収める
-BOOL HUDItem::correctRect(int rx, int ry, int rwidth, int rheight, bool flag)
-{
-	BOOL ret = TRUE;
-
-	if(this->x < rx){
-		if(flag) this->x = rx;
-		ret = FALSE;
-	}
-	if(this->y < ry){
-		if(flag) this->y = ry;
-		ret = FALSE;
-	}
-	if(rwidth < this->x + this->width){
-		if(flag) this->x = rwidth - this->width;
-		ret = FALSE;
-	}
-	if(rheight < this->y + this->height){
-		if(flag) this->y = rheight - this->height;
-		ret = FALSE;
-	}
-	return ret;
-}
-
-void HUDItem::relativeMoveTo(int moveX, int moveY)
-{
-	this->x += moveX;
-	this->y += moveY;
-}
-
-void HUDItem::moveTo(int moveX, int moveY)
-{
-	this->x = moveX;
-	this->y = moveY;
-}
-
-// ----------------------------
-//	HUDImageItem
-// ----------------------------
-class HUDImageItem : public HUDItem
-{
-private:
-	Bitmap *image;
-
-public:
-	HUDImageItem(int x, int y, int zOrder, wstring filePath) : HUDItem(x,y,zOrder,0,0)
-	{
-		loadFromFile(filePath);
-	}
-	
-	void loadFromFile(wstring filePath){
-		trace(L"load bitmap file: %s\n", filePath.c_str());
-		this->image = new Bitmap(filePath.c_str(), FALSE);
-
-		// 画像サイズの大きさに合わせて、要素のサイズ変更
-		this->width = this->image->GetWidth();
-		this->height = this->image->GetHeight();
-		trace(L"imageitem bitmap size: %d,%d\n", this->width, this->height);
-	}
-
-	void draw(HDC hdc){
-		for(int x=0; x<this->width; x++){
-			for(int y=0; y<this->height; y++){
-				Color color;
-				this->image->GetPixel(x, y, &color);
-				::SetPixel(hdc, this->x + x, this->y + y, RGB(color.GetR(),color.GetG(),color.GetB()));
-			}
-		}
-
-		drawDebugInfo(hdc);
-	}
-};
-
-// ==================================================================
-//	HUDContainer
-// ==================================================================
-class HUDContainer : public HUDItem
-{
-public:
-	std::list<HUDItem *>hudElements;
-
-	HUDContainer(int x, int y, int w, int h, int z) : HUDItem(x, y, w, h, z) {
-		this->x = x;
-		this->y = y;
-		this->zOrder = z;
-		this->width = w;
-		this->height = h;
-	}
-	~HUDContainer(){
-		return;
-	}
-
-	void draw(HDC);
-	BOOL hitTest(POINT pt);
-	HUDItem *getHitTestItem(POINT pt);
-	BOOL correctRect(int rx, int ry, int rwidth, int rheight, bool flag);
-	//void relativeMoveTo(int moveX, int moveY);
-	void moveTo(int moveX, int moveY);
-};
-
-void HUDContainer::draw(HDC hdc)
-{
-	trace(L"HUDContainer::draw();\n");
-
-	// 背景自体の描画
-	::FillRectBrush(hdc, this->x, this->y, this->width, this->height, RGB(0,0,255));
-
-	// 下位のHUD要素を描画する
-	list<HUDItem *>::iterator it = this->hudElements.begin();
-	while(it != this->hudElements.end()){
-		(*it)->draw(hdc);
-		it++;
-	}
-}
-
-BOOL HUDContainer::hitTest(POINT pt)
-{
-	// 下位のHUD要素を描画する
-	list<HUDItem *>::iterator it = this->hudElements.begin();
-	while(it != this->hudElements.end()){
-		if( (*it)->hitTest(pt) ){
-			return TRUE;
-		}
-		it++;
-	}
-
-	// 背景自体のhitTest
-	if(HUDItem::hitTest(pt)){
-		return TRUE;
-	}
-	return FALSE;
-}
-
-HUDItem *HUDContainer::getHitTestItem(POINT pt)
-{
-	// 子要素のヒット判定を先に行う
-	// 下位のHUD要素を描画する
-	list<HUDItem *>::iterator it = this->hudElements.begin();
-	while(it != this->hudElements.end()){
-		if( (*it)->hitTest(pt) ){
-			return *it; // ヒットしたものを返却する
-		}
-		it++;
-	}
-
-	// 背景自体のhitTest
-	if(HUDItem::hitTest(pt)){
-		return this;
-	}
-	return NULL;
-}
-
-BOOL HUDContainer::correctRect(int rx, int ry, int rwidth, int rheight, bool flag)
-{
-	int xx,yy,ww,hh;
-
-	xx = this->x;
-	yy = this->y;
-	ww = this->width;
-	hh = this->height;
-
-	HUDItem::correctRect(rx, ry, rwidth, rheight, flag);
-	
-	// 親が補正によって移動した分を探す
-	xx = xx - this->x;
-	yy = yy - this->y;
-	ww = ww - this->width;
-	hh = hh - this->height;
-	trace(L"correct: %d,%d,%d,%d\n", xx, yy, ww, hh);
-
-	// 親が補正された分だけ子供も補正する
-	list<HUDItem *>::iterator it = this->hudElements.begin();
-	while(it != this->hudElements.end()){
-		(*it)->x -= xx;
-		(*it)->y -= yy;
-		it++;
-	}
-	
-	return TRUE;
-}
-
-// 単位は絶対座標
-void HUDContainer::moveTo(int moveX, int moveY)
-{
-	trace(L"HUDContainer move to %d,%d\n", moveX, moveY);
-
-	// 前回位置からの差分を求める
-	// その差ぶんだけ、コンテナ内のオブジェクトを移動させる
-	int diff_x = moveX - this->x;
-	int diff_y = moveY - this->y;
-
-	// 自分自身の移動を行う
-	this->x += diff_x;
-	this->y += diff_y;
-
-	list<HUDItem *>::iterator it = this->hudElements.begin();
-	while(it != this->hudElements.end()){
-		(*it)->x += diff_x;
-		(*it)->y += diff_y;
-		it++;
-	}
-}
-
-//list<HUDItem *> hudItemList;
 HUDContainer *container = new HUDContainer(0, 0, 400, 400, 0);
 list<HUDItem *>::iterator it;
 
 BOOL bDrag = FALSE;
+BOOL bStretchMode = FALSE; // 拡大縮小モード
+int bStretchPos = 0; // どの拡大縮小領域がおされたか
 HUDItem *activeItem = NULL; // 現在移動中のitemへのポインタ
 POINT mousePressedPt = {0}; // マウス押したときの座標
 POINT mouseReleasedPt = {0}; // マウス離したときの座標
@@ -426,19 +146,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			int y = GET_Y_LPARAM(lParam);
 			POINT pt = {x, y};
 
-			bool hitFlag = false;
-
-			HUDItem *item = NULL;
-			if( container->hitTest(pt) ){
-				item = container->getHitTestItem(pt);
-			}
-			
 			// ヒットしてるかどうか
 			if(HUDItem *item = container->getHitTestItem(pt)){
 				::trace(L"mouseL Hit!!\n");
 				
 				// ヒットしてたら対象となるHUD要素を記憶
-				//::activeItem = *it;
 				::activeItem = item;
 				mousePressedPt.x = pt.x;
 				mousePressedPt.y = pt.y;
@@ -446,6 +158,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				// マウスクリックされたときのactiveitemの座標
 				mousePressedActiveItemPt.x = item->x;
 				mousePressedActiveItemPt.y = item->y;
+
+				// ストレッチモードの短形でクリックが押されているかどうか
+				if(activeItem->hitTestStretchMode(pt)){
+					trace(L"Go Stretch Mode\n");
+					bStretchPos = activeItem->hitTestStretchMode(pt);
+					::bStretchMode = TRUE;
+				}else{
+					::bStretchMode = FALSE;
+				}
+
+				::InvalidateRect(hWnd, NULL, FALSE);
 
 				bDrag = TRUE;
 				::SetCapture(hWnd);
@@ -458,22 +181,71 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		break;
 	case WM_MOUSEMOVE:
 		{
-			if(bDrag){
-				int x = GET_X_LPARAM(lParam);
-				int y = GET_Y_LPARAM(lParam);
-				::trace(L"dragging: %d,%d now\n", x, y);
-				
+			int x = GET_X_LPARAM(lParam);
+			int y = GET_Y_LPARAM(lParam);
+			::trace(L"dragging: %d,%d now\n", x, y);
+	
+			if(bDrag && bStretchMode){
+				// 拡大縮小モード
+				::trace(L"stretch mode now\n");
+				::trace(L"***DIFF: %d,%d", x - ::mousePressedPt.x, y - ::mousePressedPt.y);
+
+				if(bStretchPos == STRETCH_BOTTOM_RIGHT){
+					// 左上固定拡大方式
+					activeItem->resizeTo(x - ::mousePressedPt.x, y - ::mousePressedPt.y);
+				}
+				if(bStretchPos == STRETCH_TOP_RIGHT){
+					// 左下固定拡大方式
+					int diffx = x - ::mousePressedPt.x;
+					int diffy = y - ::mousePressedPt.y;
+
+					activeItem->x += 0; // kotei
+					activeItem->y += diffy;
+					activeItem->width += diffx;
+					activeItem->height -= diffy;
+				}
+				if(bStretchPos == STRETCH_TOP_LEFT){
+					// 右下固定拡大方式
+					int diffx = x - ::mousePressedPt.x;
+					int diffy = y - ::mousePressedPt.y;
+
+					activeItem->x += diffx; // kotei
+					activeItem->y += diffy;
+					activeItem->width -= diffx;
+					activeItem->height -= diffy;
+				}
+				if(bStretchPos == STRETCH_BOTTOM_LEFT){
+					// 右上固定方式
+					int diffx = x - ::mousePressedPt.x;
+					int diffy = y - ::mousePressedPt.y;
+
+					activeItem->x += diffx; // kotei
+					activeItem->y += 0;
+					activeItem->width -= diffx;
+					activeItem->height += diffy;
+				}
+
+				::mousePressedPt.x = x;
+				::mousePressedPt.y = y;
+
+				::InvalidateRect(hWnd, NULL, FALSE);
+
+			}else if(bDrag){
 				// オブジェクトが画面外に出てたら補正して中に戻す
 				// 絶対座標で移動させます
 				// 現在のマウスの座標 - ドラッグ開始した座標
 				// これによりドラッグ開始したときからの移動距離がわかる
 				// correctされた結果との差分のほうがいい
-				activeItem->moveTo(mousePressedActiveItemPt.x + x - mousePressedPt.x,
-					mousePressedActiveItemPt.y + y - mousePressedPt.y);
+				//activeItem->moveTo(mousePressedActiveItemPt.x + x - mousePressedPt.x,
+					//mousePressedActiveItemPt.y + y - mousePressedPt.y);
+				activeItem->moveTo(x - mousePressedPt.x, y - mousePressedPt.y);
 				activeItem->correctRect(0, 0, buffering.width, buffering.height, true);
 				
 				::trace(L"dragging: -> %d,%d now\n", activeItem->x, activeItem->y);
 			
+				::mousePressedPt.x = x;
+				::mousePressedPt.y = y;
+
 				// 画面を更新
 				::InvalidateRect(hWnd, NULL, FALSE);
 			}
@@ -488,6 +260,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			::ReleaseCapture();
 			trace(L"drag exit\n");
 		}
+		if(bStretchMode){
+			bStretchMode = FALSE;
+			bStretchPos = 0;
+		}
 		break;
 	case WM_PAINT:
 		{
@@ -499,7 +275,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 			// 各オブジェクトの描画
 			container->draw(hdc);
-			
+
+			if(activeItem){
+				trace(L"drawing activeItem: %X\n", activeItem);
+				activeItem->highlight(hdc);
+			}
+
 			::EndPaint(hWnd, &ps);
 		}
 		break;
