@@ -73,6 +73,27 @@ void DoubleBuffering::swap()
 	::BitBlt(this->firstDC, 0, 0, this->width, this->height, this->secondDC, 0, 0, SRCCOPY);
 }
 
+#include <iostream>
+#include <fstream>
+#include <sstream>
+
+wstring readFile(wstring filePath)
+{
+	wifstream ifs(filePath, ios::in);
+	wstringstream ss;
+	
+	TCHAR buf[256];
+	while(!ifs.eof()){
+		ifs.getline(buf, sizeof(buf));
+		ss << buf;
+	}
+	return ss.str();
+}
+
+void loadHudlayout(wstring filePath)
+{
+	wstring data = readFile(filePath);
+}
 
 HUDContainer *container = new HUDContainer(0, 0, 400, 400, 0);
 list<HUDItem *>::iterator it;
@@ -120,6 +141,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			container->hudElements.push_back(new HUDItem(300, 500, 100, 100, 2));
 			container->hudElements.push_back(new HUDImageItem(400,400,3, L"hudelement.png"));
 			
+			// hudlayout.resファイル読み込み
+			loadHudlayout(L"resource/hudlayout.res");
+
 			// メモリDCの作成
 			buffering.createSecondBuffer(::GetDC(hWnd), backgroundBitmap->GetWidth(), backgroundBitmap->GetHeight());
 			
@@ -231,13 +255,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				::InvalidateRect(hWnd, NULL, FALSE);
 
 			}else if(bDrag){
-				// オブジェクトが画面外に出てたら補正して中に戻す
-				// 絶対座標で移動させます
-				// 現在のマウスの座標 - ドラッグ開始した座標
-				// これによりドラッグ開始したときからの移動距離がわかる
-				// correctされた結果との差分のほうがいい
-				//activeItem->moveTo(mousePressedActiveItemPt.x + x - mousePressedPt.x,
-					//mousePressedActiveItemPt.y + y - mousePressedPt.y);
 				activeItem->moveTo(x - mousePressedPt.x, y - mousePressedPt.y);
 				activeItem->correctRect(0, 0, buffering.width, buffering.height, true);
 				
